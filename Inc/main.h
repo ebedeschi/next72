@@ -34,7 +34,12 @@
 #ifndef __MAIN_H
 #define __MAIN_H
   /* Includes ------------------------------------------------------------------*/
-
+#include "component.h"
+#include "x_nucleo_iks01a2.h"
+#include "x_nucleo_iks01a2_accelero.h"
+#include "x_nucleo_iks01a2_gyro.h"
+#include "x_nucleo_iks01a2_humidity.h"
+#include "x_nucleo_iks01a2_temperature.h"
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */

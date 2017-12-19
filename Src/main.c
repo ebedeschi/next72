@@ -37,16 +37,30 @@
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
 
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
+typedef struct displayFloatToInt_s {
+  int8_t sign; /* 0 means positive, 1 means negative*/
+  uint32_t  out_int;
+  uint32_t  out_dec;
+} displayFloatToInt_t;
 
+#define MAX_BUF_SIZE 256
+static char dataOut[MAX_BUF_SIZE];
+static uint8_t verbose              = 0;
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-
+static void *LSM6DSL_X_0_handle = NULL;
+static void *LSM6DSL_G_0_handle = NULL;
+static void *HTS221_H_0_handle  = NULL;
+static void *HTS221_T_0_handle  = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -55,7 +69,10 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
-
+static void Accelero_Sensor_Handler( void *handle );
+static void Gyro_Sensor_Handler( void *handle );
+static void Humidity_Sensor_Handler( void *handle );
+static void Temperature_Sensor_Handler( void *handle );
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -79,12 +96,19 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
-  MX_SPI2_Init();
+//  MX_I2C1_Init();
+//  MX_SPI2_Init();
   MX_USART2_UART_Init();
 
-  /* USER CODE BEGIN 2 */
+//  BSP_ACCELERO_Init( LSM6DSL_X_0, &LSM6DSL_X_0_handle );
+//  BSP_GYRO_Init( LSM6DSL_G_0, &LSM6DSL_G_0_handle );
+//  BSP_HUMIDITY_Init( HTS221_H_0, &HTS221_H_0_handle );
+//  BSP_TEMPERATURE_Init( HTS221_T_0, &HTS221_T_0_handle );
 
+  /* USER CODE BEGIN 2 */
+//  BSP_ACCELERO_Sensor_Enable( LSM6DSL_X_0_handle );
+//  BSP_HUMIDITY_Sensor_Enable( HTS221_H_0_handle );
+//  BSP_TEMPERATURE_Sensor_Enable( HTS221_T_0_handle );
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -93,10 +117,11 @@ int main(void)
   {
 	  HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
   /* USER CODE END WHILE */
-
+//      Humidity_Sensor_Handler( HTS221_H_0_handle );
+//      Temperature_Sensor_Handler( HTS221_T_0_handle );
   /* USER CODE BEGIN 3 */
 
-	  HAL_Delay(500); //delay 100ms
+	  HAL_Delay(1000); //delay 100ms
 
   }
   /* USER CODE END 3 */
@@ -163,6 +188,297 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+/**
+ * @brief  Splits a float into two integer values.
+ * @param  in the float value as input
+ * @param  out_value the pointer to the output integer structure
+ * @param  dec_prec the decimal precision to be used
+ * @retval None
+ */
+static void floatToInt(float in, displayFloatToInt_t *out_value, int32_t dec_prec)
+{
+  if(in >= 0.0f)
+  {
+    out_value->sign = 0;
+  }else
+  {
+    out_value->sign = 1;
+    in = -in;
+  }
+
+  out_value->out_int = (int32_t)in;
+  in = in - (float)(out_value->out_int);
+  out_value->out_dec = (int32_t)trunc(in * pow(10, dec_prec));
+}
+
+/**
+ * @brief  Handles the accelerometer axes data getting/sending
+ * @param  handle the device handle
+ * @retval None
+ */
+static void Accelero_Sensor_Handler( void *handle )
+{
+
+  uint8_t who_am_i;
+  float odr;
+  float fullScale;
+  uint8_t id;
+  SensorAxes_t acceleration;
+  uint8_t status;
+  displayFloatToInt_t out_value;
+
+  BSP_ACCELERO_Get_Instance( handle, &id );
+
+  BSP_ACCELERO_IsInitialized( handle, &status );
+
+  if ( status == 1 )
+  {
+    if ( BSP_ACCELERO_Get_Axes( handle, &acceleration ) == COMPONENT_ERROR )
+    {
+      acceleration.AXIS_X = 0;
+      acceleration.AXIS_Y = 0;
+      acceleration.AXIS_Z = 0;
+    }
+
+    snprintf( dataOut, MAX_BUF_SIZE, "\r\nACC_X[%d]: %d, ACC_Y[%d]: %d, ACC_Z[%d]: %d\r\n", (int)id, (int)acceleration.AXIS_X, (int)id,
+             (int)acceleration.AXIS_Y, (int)id, (int)acceleration.AXIS_Z );
+
+    HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+
+    if ( verbose == 1 )
+    {
+      if ( BSP_ACCELERO_Get_WhoAmI( handle, &who_am_i ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: 0x%02X\r\n", id, who_am_i );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+      if ( BSP_ACCELERO_Get_ODR( handle, &odr ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        floatToInt( odr, &out_value, 3 );
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: %d.%03d Hz\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+      if ( BSP_ACCELERO_Get_FS( handle, &fullScale ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "FS[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        floatToInt( fullScale, &out_value, 3 );
+        snprintf( dataOut, MAX_BUF_SIZE, "FS[%d]: %d.%03d g\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+    }
+  }
+}
+
+
+
+/**
+ * @brief  Handles the gyroscope axes data getting/sending
+ * @param  handle the device handle
+ * @retval None
+ */
+static void Gyro_Sensor_Handler( void *handle )
+{
+
+  uint8_t who_am_i;
+  float odr;
+  float fullScale;
+  uint8_t id;
+  SensorAxes_t angular_velocity;
+  uint8_t status;
+  displayFloatToInt_t out_value;
+
+  BSP_GYRO_Get_Instance( handle, &id );
+
+  BSP_GYRO_IsInitialized( handle, &status );
+
+  if ( status == 1 )
+  {
+    if ( BSP_GYRO_Get_Axes( handle, &angular_velocity ) == COMPONENT_ERROR )
+    {
+      angular_velocity.AXIS_X = 0;
+      angular_velocity.AXIS_Y = 0;
+      angular_velocity.AXIS_Z = 0;
+    }
+
+    snprintf( dataOut, MAX_BUF_SIZE, "\r\nGYR_X[%d]: %d, GYR_Y[%d]: %d, GYR_Z[%d]: %d\r\n", (int)id, (int)angular_velocity.AXIS_X, (int)id,
+             (int)angular_velocity.AXIS_Y, (int)id, (int)angular_velocity.AXIS_Z );
+
+    HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+    if ( verbose == 1 )
+    {
+      if ( BSP_GYRO_Get_WhoAmI( handle, &who_am_i ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: 0x%02X\r\n", id, who_am_i );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+      if ( BSP_GYRO_Get_ODR( handle, &odr ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        floatToInt( odr, &out_value, 3 );
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: %d.%03d Hz\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+      if ( BSP_GYRO_Get_FS( handle, &fullScale ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "FS[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        floatToInt( fullScale, &out_value, 3 );
+        snprintf( dataOut, MAX_BUF_SIZE, "FS[%d]: %d.%03d dps\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+    }
+  }
+}
+
+/**
+ * @brief  Handles the humidity data getting/sending
+ * @param  handle the device handle
+ * @retval None
+ */
+static void Humidity_Sensor_Handler( void *handle )
+{
+
+  uint8_t who_am_i;
+  float odr;
+  uint8_t id;
+  float humidity;
+  uint8_t status;
+  displayFloatToInt_t out_value;
+
+  BSP_HUMIDITY_Get_Instance( handle, &id );
+
+  BSP_HUMIDITY_IsInitialized( handle, &status );
+
+  if ( status == 1 )
+  {
+    if ( BSP_HUMIDITY_Get_Hum( handle, &humidity ) == COMPONENT_ERROR )
+    {
+      humidity = 0.0f;
+    }
+
+    floatToInt( humidity, &out_value, 2 );
+    snprintf( dataOut, MAX_BUF_SIZE, "\r\nHUM[%d]: %d.%02d\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+    HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+    if ( verbose == 1 )
+    {
+      if ( BSP_HUMIDITY_Get_WhoAmI( handle, &who_am_i ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: 0x%02X\r\n", id, who_am_i );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+      if ( BSP_HUMIDITY_Get_ODR( handle, &odr ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        floatToInt( odr, &out_value, 3 );
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: %d.%03d Hz\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+    }
+  }
+}
+
+
+
+/**
+ * @brief  Handles the temperature data getting/sending
+ * @param  handle the device handle
+ * @retval None
+ */
+static void Temperature_Sensor_Handler( void *handle )
+{
+
+  uint8_t who_am_i;
+  float odr;
+  uint8_t id;
+  float temperature;
+  uint8_t status;
+  displayFloatToInt_t out_value;
+
+  BSP_TEMPERATURE_Get_Instance( handle, &id );
+
+  BSP_TEMPERATURE_IsInitialized( handle, &status );
+
+  if ( status == 1 )
+  {
+    if ( BSP_TEMPERATURE_Get_Temp( handle, &temperature ) == COMPONENT_ERROR )
+    {
+      temperature = 0.0f;
+    }
+
+    floatToInt( temperature, &out_value, 2 );
+    snprintf( dataOut, MAX_BUF_SIZE, "\r\nTEMP[%d]: %c%d.%02d\r\n", (int)id, ((out_value.sign) ? '-' : '+'), (int)out_value.out_int, (int)out_value.out_dec );
+    HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+    if ( verbose == 1 )
+    {
+      if ( BSP_TEMPERATURE_Get_WhoAmI( handle, &who_am_i ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "WHO AM I address[%d]: 0x%02X\r\n", id, who_am_i );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+
+      if ( BSP_TEMPERATURE_Get_ODR( handle, &odr ) == COMPONENT_ERROR )
+      {
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: ERROR\r\n", id );
+      }
+      else
+      {
+        floatToInt( odr, &out_value, 3 );
+        snprintf( dataOut, MAX_BUF_SIZE, "ODR[%d]: %d.%03d Hz\r\n", (int)id, (int)out_value.out_int, (int)out_value.out_dec );
+      }
+
+      HAL_UART_Transmit( &huart2, ( uint8_t * )dataOut, strlen( dataOut ), 5000 );
+    }
+  }
+}
 
 /* USER CODE END 4 */
 
